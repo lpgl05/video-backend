@@ -1744,7 +1744,9 @@ async def process_clips_optimized(req):
     local_video_paths = [url_to_path.get(v.url) for v in video_files if url_to_path.get(v.url)]
     local_audio_paths = [url_to_path.get(a.url) for a in audio_files if url_to_path.get(a.url)]
 
-    local_audio_paths = process_original_video(local_audio_paths)
+    print(f"请求的是否是竖屏 {req.portraitMode}")
+    if req.portraitMode:
+        local_audio_paths = process_original_video(local_audio_paths)
     
     local_poster_path = None
     if poster_files and len(poster_files) > 0:
