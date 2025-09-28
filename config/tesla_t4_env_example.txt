@@ -1,0 +1,42 @@
+# Tesla T4 GPU优化配置
+# 将此内容添加到您的.env文件中
+
+# GPU加速总开关
+GPU_ACCELERATION_ENABLED=true
+
+# GPU首选编码器 (Tesla T4使用NVENC)
+GPU_PREFERRED_ENCODER=nvenc
+
+# 质量模式 (balanced为推荐设置)
+GPU_QUALITY_MODE=balanced
+
+# 启用CPU回退 (GPU失败时自动使用CPU)
+GPU_FALLBACK_TO_CPU=true
+
+# Tesla T4专用NVENC配置
+NVENC_PRESET=p4
+NVENC_RC_MODE=vbr
+NVENC_CQ=23
+NVENC_BITRATE=10M
+NVENC_MAXRATE=15M
+NVENC_GPU_ID=0
+
+# 硬件解码优化
+GPU_HARDWARE_DECODE=true
+GPU_MEMORY_OPTIMIZATION=true
+
+# 调试模式 (可选，用于排查问题)
+GPU_DEBUG_MODE=false
+GPU_BENCHMARK_MODE=false
+
+# Tesla T4特定优化
+TESLA_T4_OPTIMIZED=true
+TESLA_T4_MAX_CONCURRENT_TASKS=3
+TESLA_T4_MEMORY_BUFFER=2048
+
+# FFmpeg路径 (如果需要指定特定版本)
+# FFMPEG_PATH=/usr/local/bin/ffmpeg
+
+# 性能监控
+ENABLE_GPU_MONITORING=true
+GPU_PERFORMANCE_LOGGING=true
