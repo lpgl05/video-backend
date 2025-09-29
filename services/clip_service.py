@@ -1961,7 +1961,8 @@ async def process_clips001(req,process):
     local_audio_paths = [url_to_path.get(a.url) for a in audio_files if url_to_path.get(a.url)]
 
     print(local_video_paths)
-    local_video_paths = process_original_video(local_video_paths)
+    if req.portraitMode:
+        local_video_paths = process_original_video(local_video_paths)
     print(local_video_paths)
 
     local_poster_path = None
