@@ -58,16 +58,12 @@ class ClipRequest(BaseModel):
     voiceSpeed: Optional[float] = 1.0
     style: StyleConfig
     portraitMode: Optional[bool] = None
-    playbackSpeed: str
 
 class StartGenerationRequest(BaseModel):
     projectId: str
 
 # 添加全局变量存储最新生成的视频
 _latest_generated_videos = []
-
-# 添加全局变量存储正在生成的视频
-_processing_generated_videos = {}
 
 # 任务状态存储（生产环境建议用Redis）
 _task_storage = {}
@@ -139,11 +135,10 @@ async def gpu_optimized_worker_coroutine(worker_name: str):
                 _task_storage[task_id]["updatedAt"] = datetime.now().isoformat()
                 _task_storage[task_id]["worker"] = worker_name
                 _task_storage[task_id]["gpu_enabled"] = _gpu_optimization_enabled
-                _processing_generated_videos[task_id]=[]
 
             # 执行GPU优化的视频生成任务
             start_time = time.time()
-            await process_video_generation(task_id, clip_req,_processing_generated_videos[task_id])
+            await process_video_generation(task_id, clip_req)
             processing_time = time.time() - start_time
 
             print(f"✅ {worker_name} 完成任务: {task_id} (耗时: {processing_time:.1f}秒)")
@@ -163,9 +158,7 @@ async def gpu_optimized_worker_coroutine(worker_name: str):
             # 从处理集合中移除任务
             if task_id in _processing_tasks:
                 _processing_tasks.remove(task_id)
-
             _task_queue.task_done()
-            _processing_generated_videos.pop(task_id,None)
             print(f"🔄 当前并发任务数: {len(_processing_tasks)}/{_max_concurrent_tasks}")
 
 # 保持原有的worker_coroutine作为备用
@@ -173,7 +166,7 @@ async def worker_coroutine(worker_name: str):
     """传统工作协程 - 备用模式"""
     return await gpu_optimized_worker_coroutine(worker_name)
 
-async def process_clips_with_gpu_acceleration(task_id: str, clip_req: ClipRequest,processing):
+async def process_clips_with_gpu_acceleration(task_id: str, clip_req: ClipRequest):
     """GPU加速的视频处理核心函数"""
     try:
         print(f"🎬 启动GPU加速视频处理: {clip_req.name}")
@@ -203,7 +196,7 @@ async def process_clips_with_gpu_acceleration(task_id: str, clip_req: ClipReques
         composition_start = time.time()
 
         # 调用优化后的视频处理服务
-        result = await process_clips001(clip_req,processing)
+        result = await process_clips001(clip_req)
 
         composition_time = time.time() - composition_start
         print(f"✅ GPU合成完成，耗时: {composition_time:.1f}秒")
@@ -235,9 +228,9 @@ async def process_clips_with_gpu_acceleration(task_id: str, clip_req: ClipReques
         print(f"❌ GPU加速处理异常: {e}")
         # 回退到原始处理方式
         print("🔄 回退到CPU处理模式...")
-        return await process_clips001(clip_req,processing)
+        return await process_clips001(clip_req)
 
-async def process_video_generation(task_id: str, clip_req: ClipRequest,processing):
+async def process_video_generation(task_id: str, clip_req: ClipRequest):
     """GPU加速的视频生成任务处理"""
     try:
         print(f"🚀 开始GPU加速视频生成: {task_id}")
@@ -257,7 +250,7 @@ async def process_video_generation(task_id: str, clip_req: ClipRequest,processin
             _task_storage[task_id]["updatedAt"] = datetime.now().isoformat()
 
         # 使用GPU加速的视频处理服务
-        result = await process_clips_with_gpu_acceleration(task_id, clip_req,processing)
+        result = await process_clips_with_gpu_acceleration(task_id, clip_req)
 
         processing_time = time.time() - start_time
         print(f"✅ GPU加速处理完成: {task_id}, 耗时: {processing_time:.1f}秒")
@@ -268,7 +261,7 @@ async def process_video_generation(task_id: str, clip_req: ClipRequest,processin
             _task_storage[task_id]["progress"] = 100
             _task_storage[task_id]["result"] = result
             _task_storage[task_id]["updatedAt"] = datetime.now().isoformat()
-            _processing_generated_videos.pop(task_id,None)
+            
         # 添加到最新生成视频列表
         _latest_generated_videos.append({
             "id": task_id,
@@ -286,7 +279,6 @@ async def process_video_generation(task_id: str, clip_req: ClipRequest,processin
             _task_storage[task_id]["status"] = "failed"
             _task_storage[task_id]["error"] = str(e)
             _task_storage[task_id]["updatedAt"] = datetime.now().isoformat()
-            _processing_generated_videos.pop(task_id,None)
         raise
 
 def get_queue_status_info():
@@ -329,8 +321,7 @@ async def save_project_and_generate(req: ClipRequest, background_tasks: Backgrou
             "voice": req.voice,
             "voiceSpeed": req.voiceSpeed,
             "style": req.style.dict() if hasattr(req.style, "dict") else req.style,
-            "portraitMode": req.portraitMode,
-            "playbackSpeed":req.playbackSpeed
+            "portraitMode": req.portraitMode
         }
     }
 
@@ -420,9 +411,7 @@ async def get_generation_status(task_id: str):
         current_queue_size = _task_queue.qsize()
         task_data["currentQueueSize"] = current_queue_size
         task_data["estimatedWaitTime"] = f"预计等待 {current_queue_size * 3} 分钟"
-    if task_data["status"] == "processing":
-        task_data["videos"]=_processing_generated_videos[task_id]
-        task_data["task_id"]=task_id
+    
     return {
         "success": True,
         "data": task_data

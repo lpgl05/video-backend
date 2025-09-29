@@ -214,7 +214,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 duration = total_duration / len(sentences)
             
             # 设置最小和最大显示时间
-            min_duration = 1.0  # 最少显示1.5秒
+            min_duration = 1.5  # 最少显示1.5秒
             max_duration = 5.0   # 最多显示5秒
             
             duration = max(min_duration, min(duration, max_duration))
