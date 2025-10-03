@@ -198,7 +198,8 @@ def create_gpu_video_with_srt_subtitles(
     poster_image: str = None,
     use_gpu: bool = True,
     subtitle_sentences: List[Dict] = None,
-    style: dict = None
+    style: dict = None,
+    portraitMode: bool = True,
 ) -> bool:
     """
     使用GPU和SRT字幕创建视频
@@ -214,7 +215,8 @@ def create_gpu_video_with_srt_subtitles(
         title_position: 标题位置
         poster_image: 海报图片路径（可选）
         use_gpu: 是否使用GPU
-    
+        portraitMode: 是否为竖版视频
+
     Returns:
         bool: 处理是否成功
     """
@@ -289,9 +291,22 @@ def create_gpu_video_with_srt_subtitles(
             title_y = "(H-h)/2-100"
         else:  # bottom
             title_y = f"H-h-{title_margin}"
-        
-        # 视频处理：叠加标题
-        filter_parts.append(f"[0:v][1:v]overlay=0:{title_y}[video_with_title];")
+
+        if not portraitMode:
+            # 横版视频，缩放标题宽度为1080，高度自适应
+            filter_parts.append(
+                "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2,boxblur=40:20[bg];"
+            )
+            filter_parts.append(
+                "[0:v]scale=1080:-1:force_original_aspect_ratio=decrease[fg];"
+            )
+            filter_parts.append("[bg][fg]overlay=(W-w)/2:(H-h)/2;")
+            # 避免重复添加标题 overlay，导致未连接的输出标签错误
+            overlay_title = f"[video_base][1:v]overlay=0:{title_y}[video_with_title];"
+            if overlay_title not in filter_parts:
+                filter_parts.append(overlay_title)
+        else:
+            filter_parts.append(f"[0:v][1:v]overlay=0:{title_y}[video_with_title];")
         
         # 如果有SRT字幕，添加字幕处理
         if srt_file and os.path.exists(srt_file):

@@ -1309,7 +1309,8 @@ def _process_single_video_001(video_index, video_count, local_video_paths, local
             poster_image=local_poster_path,
             use_gpu=True,  # 强制使用GPU
             subtitle_sentences=subtitle_sentences,
-            style=style  # 传递样式配置
+            style=style,  # 传递样式配置
+            portraitMode=req.portraitMode  # 视频是否是竖版，True是，False不是
         )
         
         final_time = time.time() - final_start
