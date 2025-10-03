@@ -271,14 +271,26 @@ def create_gpu_video_with_srt_subtitles(
                 gpu_decode_params = []
         
         # 基础命令 - 添加硬件解码和视频循环
-        cmd = [
-            'ffmpeg', '-y',
-            *gpu_decode_params,                   # GPU硬件解码参数
-            '-stream_loop', '-1', '-i', input_video,  # 输入0: 源视频（循环播放）
-            '-loop', '1', '-i', title_image,      # 输入1: 标题图片（循环）
-            '-i', tts_audio,                      # 输入2: TTS音频
-            '-i', bgm_audio,                      # 输入3: BGM音频
-        ]
+        if not portraitMode and poster_image is not None:
+            #横版视频且用户上传了背景图
+            cmd = [
+                'ffmpeg', '-y',
+                *gpu_decode_params,                   # GPU硬件解码参数
+                '-stream_loop', '-1', '-i', input_video,  # 输入0: 源视频（循环播放）
+                '-loop', '1', '-i', title_image,      # 输入1: 标题图片（循环）
+                '-i', tts_audio,                      # 输入2: TTS音频
+                '-i', bgm_audio,                      # 输入3: BGM音频
+                '-i', poster_image                    # 输入4: 海报图片
+            ]
+        else:
+            cmd = [
+                'ffmpeg', '-y',
+                *gpu_decode_params,                   # GPU硬件解码参数
+                '-stream_loop', '-1', '-i', input_video,  # 输入0: 源视频（循环播放）
+                '-loop', '1', '-i', title_image,      # 输入1: 标题图片（循环）
+                '-i', tts_audio,                      # 输入2: TTS音频
+                '-i', bgm_audio,                      # 输入3: BGM音频
+            ]
         
         # 构建复合滤镜 - 正确的语法
         filter_parts = []
@@ -292,15 +304,22 @@ def create_gpu_video_with_srt_subtitles(
         else:  # bottom
             title_y = f"H-h-{title_margin}"
 
+        print(f"背景图片的路径：{poster_image} =================")
+
         if not portraitMode:
             # 横版视频，缩放标题宽度为1080，高度自适应
-            filter_parts.append(
-                "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2,boxblur=40:20[bg];"
-            )
+            if poster_image is not None:
+                filter_parts.append("[4:v]crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':'(iw-min(iw,ih*9/16))/2':'(ih-min(ih,iw*16/9))/2'[bg_cropped];")
+                filter_parts.append("[bg_cropped]scale=1080:1920[bg];")
+            else:
+                
+                filter_parts.append(
+                    "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2,boxblur=40:20[bg];"
+                )
             filter_parts.append(
                 "[0:v]scale=1080:-1:force_original_aspect_ratio=decrease[fg];"
             )
-            filter_parts.append("[bg][fg]overlay=(W-w)/2:(H-h)/2;")
+            filter_parts.append("[bg][fg]overlay=(W-w)/2:(H-h)/2[video_base];")
             # 避免重复添加标题 overlay，导致未连接的输出标签错误
             overlay_title = f"[video_base][1:v]overlay=0:{title_y}[video_with_title];"
             if overlay_title not in filter_parts:
