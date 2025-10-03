@@ -8,6 +8,8 @@ import os
 import subprocess
 from typing import List, Dict, Tuple
 import tempfile
+import random
+import string
 
 def get_subtitle_font_path(style_config: dict = None) -> str:
     """
@@ -304,18 +306,40 @@ def create_gpu_video_with_srt_subtitles(
         else:  # bottom
             title_y = f"H-h-{title_margin}"
 
-        print(f"背景图片的路径：{poster_image} =================")
-
         if not portraitMode:
             # 横版视频，缩放标题宽度为1080，高度自适应
             if poster_image is not None:
                 filter_parts.append("[4:v]crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':'(iw-min(iw,ih*9/16))/2':'(ih-min(ih,iw*16/9))/2'[bg_cropped];")
                 filter_parts.append("[bg_cropped]scale=1080:1920[bg];")
             else:
-                
-                filter_parts.append(
-                    "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2,boxblur=40:20[bg];"
-                )
+                # 使用命令直接生成一张图片 ffmpeg -i input.mp4 -vf "select=eq(n\,100),boxblur=10:2" -vsync vfr -frames:v 1 bg_blur.png
+                # 获取 input_video所在的文件夹路径
+                random_str = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+                bg_blur_path = os.path.join(os.path.dirname(os.path.abspath(input_video)), f'bg_blur_{random_str}.png')
+                ffmpeg_bg_cmd = [
+                    'ffmpeg', '-y',
+                    '-i', input_video,
+                    '-vf', 'select=eq(n\\,100),boxblur=10:2',
+                    '-vsync', 'vfr',
+                    '-frames:v', '1',
+                    bg_blur_path
+                ]
+                print(f"🔧 生成背景虚化图片: {bg_blur_path}")
+                result = subprocess.run(ffmpeg_bg_cmd, capture_output=True, text=True, timeout=60)
+                if result.returncode == 0:
+                    print("✅ 背景虚化图片生成成功")
+                    # 将生成的图片作为新的输入添加到主 ffmpeg 命令（作为输入4）
+                    cmd.extend(['-i', bg_blur_path])
+                    # 使用生成的图片作为背景
+                    filter_parts.append("[4:v]crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':'(iw-min(iw,ih*9/16))/2':'(ih-min(ih,iw*16/9))/2'[bg_cropped];")
+                    filter_parts.append("[bg_cropped]scale=1080:1920[bg];")
+                else:
+                    print("❌ 背景虚化图片生成失败")
+                    print(result.stderr)
+                    print("准备虚化原始视频，并将其作为背景")
+                    filter_parts.append(
+                        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2,boxblur=40:20[bg];"
+                    )
             filter_parts.append(
                 "[0:v]scale=1080:-1:force_original_aspect_ratio=decrease[fg];"
             )
