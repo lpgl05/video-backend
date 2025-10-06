@@ -170,6 +170,7 @@ async def handle_upload_video(video, task_id: str = None):
         
         uploaded_files[file_id] = {
             "type": "video",
+            "name": file_name,
             "filename": file_name,
             "url": file_url,
             "oss_path": oss_file_path if USE_OSS else (save_path if 'save_path' in locals() else None)
@@ -319,6 +320,7 @@ async def handle_upload_audio(audio, task_id: str = None):
         
         uploaded_files[file_id] = {
             "type": "audio",
+            "name": file_name,
             "filename": file_name,
             "url": file_url,
             "oss_path": oss_file_path if USE_OSS else (save_path if 'save_path' in locals() else None)
