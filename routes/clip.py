@@ -57,6 +57,7 @@ class ClipRequest(BaseModel):
     voice: str
     style: StyleConfig
     portraitMode: Optional[bool] = None
+    frameBlur: Optional[bool] = False  # 是否需要逐帧模糊视频，默认false
 
 class StartGenerationRequest(BaseModel):
     projectId: str
