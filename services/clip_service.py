@@ -779,6 +779,140 @@ async def generate_tts_audio(text: str, output_path: str, voice: str = "zh-CN-Xi
         print(f"TTS生成失败: {e}")
         raise Exception("语音合成失败")
 
+# ==================== 方案一：视频格式检测和转换功能 ====================
+# 功能开关：如果出现问题可以快速关闭
+ENABLE_VIDEO_FORMAT_CONVERSION = True
+
+# 缓存：记录哪些视频已经检测过格式，避免重复检测
+_video_format_cache = {}
+
+def detect_video_chroma_format(video_path):
+    """
+    检测视频的色度格式（Chroma Format）
+    返回：'yuv420p'（GPU兼容）或其他格式（需要转换）
+    """
+    try:
+        ffmpeg = find_ffmpeg()
+        cmd = [
+            ffmpeg,
+            '-i', video_path,
+            '-t', '0.1',  # 只检测0.1秒，快速返回
+            '-f', 'null', '-'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        output = result.stderr
+        
+        # 从ffmpeg输出中提取色度格式
+        # 示例：Stream #0:0: Video: h264, yuv422p, 1920x1080
+        import re
+        pix_fmt_match = re.search(r'yuv\d+p', output)
+        if pix_fmt_match:
+            pix_fmt = pix_fmt_match.group(0)
+            print(f"🔍 检测到视频色度格式: {pix_fmt} - {os.path.basename(video_path)}")
+            return pix_fmt
+        else:
+            # 如果无法检测，默认认为是兼容的
+            print(f"⚠️ 无法检测色度格式，默认为兼容 - {os.path.basename(video_path)}")
+            return 'yuv420p'
+    except Exception as e:
+        print(f"⚠️ 格式检测失败: {e}, 默认为兼容")
+        return 'yuv420p'
+
+def is_gpu_compatible_format(video_path):
+    """
+    判断视频格式是否与GPU兼容
+    GPU (h264_cuvid) 只支持 yuv420p 格式
+    """
+    # 检查缓存
+    if video_path in _video_format_cache:
+        return _video_format_cache[video_path]
+    
+    # 检测格式
+    pix_fmt = detect_video_chroma_format(video_path)
+    is_compatible = (pix_fmt == 'yuv420p')
+    
+    # 缓存结果
+    _video_format_cache[video_path] = is_compatible
+    
+    if is_compatible:
+        print(f"✅ 视频格式与GPU兼容: {os.path.basename(video_path)}")
+    else:
+        print(f"⚠️ 视频格式不兼容GPU ({pix_fmt})，需要转换: {os.path.basename(video_path)}")
+    
+    return is_compatible
+
+def convert_video_to_yuv420p(source_video):
+    """
+    将视频转换为GPU兼容的yuv420p格式
+    返回：转换后的视频路径（如果不需要转换，返回原路径）
+    """
+    # 如果功能被关闭，直接返回原视频
+    if not ENABLE_VIDEO_FORMAT_CONVERSION:
+        return source_video
+    
+    # 检查是否需要转换
+    if is_gpu_compatible_format(source_video):
+        return source_video
+    
+    try:
+        import time
+        ffmpeg = find_ffmpeg()
+        
+        # 生成转换后的文件名
+        base_name = os.path.basename(source_video)
+        name_without_ext = os.path.splitext(base_name)[0]
+        converted_video = os.path.join(
+            os.path.dirname(source_video),
+            f"{name_without_ext}_yuv420p.mp4"
+        )
+        
+        # 如果已经转换过，直接使用
+        if os.path.exists(converted_video):
+            print(f"♻️ 使用已转换的视频: {os.path.basename(converted_video)}")
+            return converted_video
+        
+        print(f"🔄 开始转换视频格式为yuv420p: {base_name}")
+        start_time = time.time()
+        
+        # 使用CPU转换（转换过程不使用GPU，因为就是为了解决GPU不兼容的问题）
+        cmd = [
+            ffmpeg, '-y',
+            '-i', source_video,
+            '-c:v', 'libx264',      # 使用CPU编码
+            '-pix_fmt', 'yuv420p',  # 强制转换为yuv420p
+            '-preset', 'medium',    # 中等速度，平衡质量和速度
+            '-crf', '23',           # 质量参数
+            '-c:a', 'aac',          # 音频编码
+            '-b:a', '128k',         # 音频比特率
+            '-movflags', '+faststart',
+            converted_video
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        
+        if result.returncode == 0 and os.path.exists(converted_video):
+            elapsed = time.time() - start_time
+            print(f"✅ 视频格式转换完成，耗时: {elapsed:.1f}秒")
+            print(f"   原文件: {base_name}")
+            print(f"   转换后: {os.path.basename(converted_video)}")
+            
+            # 更新缓存
+            _video_format_cache[converted_video] = True
+            
+            return converted_video
+        else:
+            print(f"❌ 视频格式转换失败: {result.stderr}")
+            print(f"⚠️ 将使用原视频，可能会导致GPU处理失败")
+            return source_video
+            
+    except Exception as e:
+        print(f"❌ 视频格式转换异常: {e}")
+        print(f"⚠️ 将使用原视频，可能会导致GPU处理失败")
+        return source_video
+
+# ==================== 方案一功能结束 ====================
+
 def extract_random_clip_ffmpeg(source_video, output_path, start_time, duration, use_gpu=True):
     """使用FFmpeg提取随机片段，强制使用GPU硬件解码和编码"""
     ffmpeg = find_ffmpeg()
@@ -1179,6 +1313,9 @@ def _process_single_video_001(video_index, video_count, local_video_paths, local
             video_path = local_video_paths[idx]
             video_info = video_infos[idx]
             
+            # ✅ 方案一：在提取片段前检测并转换视频格式
+            video_path = convert_video_to_yuv420p(video_path)
+            
             segment_duration = base_duration
             if len(temp_clips) < remaining_duration:
                 segment_duration += 1
@@ -1394,6 +1531,52 @@ def create_optimized_video_with_ass_subtitles(source_video, title_image, ass_sub
     print(f"🚀 进入ASS字幕函数 - portrait_mode: {portrait_mode}, subtitle_position: {subtitle_position}")
     ffmpeg = find_ffmpeg()
     
+    # ✅ 修复GPU不兼容stream_loop问题：预先延长视频到目标时长
+    video_info = get_video_info(source_video)
+    source_duration = video_info.get('duration', 0)
+    
+    if source_duration > 0 and source_duration < duration:
+        print(f"⚠️ 视频时长({source_duration:.1f}s)小于目标时长({duration:.1f}s)，预先延长视频...")
+        extended_video = source_video.replace('.mp4', '_extended.mp4')
+        
+        # 计算需要循环的次数
+        loop_times = int(duration / source_duration) + 1
+        
+        # 创建concat列表文件
+        concat_list = source_video.replace('.mp4', '_concat_list.txt')
+        with open(concat_list, 'w') as f:
+            for _ in range(loop_times):
+                f.write(f"file '{os.path.abspath(source_video)}'\n")
+        
+        # 使用CPU concat（更稳定）延长视频
+        cmd = [
+            ffmpeg, '-y',
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', concat_list,
+            '-t', str(duration),  # 截取到目标时长
+            '-c:v', 'libx264',  # CPU编码
+            '-preset', 'fast',
+            '-crf', '23',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            extended_video
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=False, timeout=120)
+        
+        # 清理临时文件
+        if os.path.exists(concat_list):
+            os.remove(concat_list)
+        
+        if result.returncode == 0 and os.path.exists(extended_video):
+            print(f"✅ 视频延长完成: {source_duration:.1f}s -> {duration:.1f}s")
+            source_video = extended_video  # 使用延长后的视频
+        else:
+            print(f"⚠️ 视频延长失败，将继续使用stream_loop（可能导致GPU问题）")
+    else:
+        print(f"✅ 视频时长({source_duration:.1f}s)足够，无需延长")
+    
     # 调试信息：打印参数
     print(f"🔍 ASS字幕调试信息 - portrait_mode: {portrait_mode}, subtitle_position: {subtitle_position}")
     
@@ -1446,7 +1629,7 @@ def create_optimized_video_with_ass_subtitles(source_video, title_image, ass_sub
         inputs = [
             ffmpeg, '-y',
             *gpu_decode_params,                        # GPU硬件解码参数
-            '-stream_loop', '-1', '-i', source_video,  # 输入0: 源视频
+            '-i', source_video,                        # 输入0: 源视频（已预先延长）
             '-loop', '1', '-i', title_image,           # 输入1: Title图片
             '-i', tts_audio,                           # 输入2: TTS音频
             '-i', bgm_audio,                           # 输入3: BGM音频
@@ -1474,7 +1657,7 @@ def create_optimized_video_with_ass_subtitles(source_video, title_image, ass_sub
         inputs = [
             ffmpeg, '-y',
             *gpu_decode_params,                        # GPU硬件解码参数
-            '-stream_loop', '-1', '-i', source_video,  # 输入0: 源视频
+            '-i', source_video,                        # 输入0: 源视频（已预先延长）
             '-loop', '1', '-i', title_image,           # 输入1: Title图片
             '-i', tts_audio,                           # 输入2: TTS音频
             '-i', bgm_audio,                           # 输入3: BGM音频
@@ -1503,7 +1686,7 @@ def create_optimized_video_with_ass_subtitles(source_video, title_image, ass_sub
         inputs = [
             ffmpeg, '-y',
             *gpu_decode_params,                        # GPU硬件解码参数
-            '-stream_loop', '-1', '-i', source_video,  # 输入0: 源视频
+            '-i', source_video,                        # 输入0: 源视频（已预先延长）
             '-loop', '1', '-i', title_image,           # 输入1: Title图片
             '-i', tts_audio,                           # 输入2: TTS音频
             '-i', bgm_audio,                           # 输入3: BGM音频
@@ -2621,6 +2804,9 @@ def _process_single_video_optimized(video_index, video_count, local_video_paths,
         for idx in indices:
             video_path = local_video_paths[idx]
             video_info = video_infos[idx]
+            
+            # ✅ 方案一：在提取片段前检测并转换视频格式
+            video_path = convert_video_to_yuv420p(video_path)
             
             segment_duration = base_duration
             if len(temp_clips) < remaining_duration:

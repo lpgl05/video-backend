@@ -303,6 +303,20 @@ async def save_project_and_generate(req: ClipRequest, background_tasks: Backgrou
     project_id = str(uuid4())
     _project_storage[project_id] = req
     
+    # ✅ 调试日志：打印接收到的项目配置
+    print(f"📦 保存项目配置: {project_id}")
+    print(f"   项目名称: {req.name}")
+    print(f"   视频素材数量: {len(req.videos)}")
+    print(f"   音频素材数量: {len(req.audios)}")
+    print(f"   海报素材数量: {len(req.posters or [])}")
+    print(f"   文案数量: {len(req.scripts)}")
+    if len(req.videos) > 0:
+        print(f"   视频素材详情:")
+        for i, v in enumerate(req.videos):
+            print(f"     视频{i+1}: id={v.id}, name={v.name}, url={v.url}")
+    else:
+        print(f"   ⚠️  警告：没有视频素材！")
+    
     # 启动队列处理器（如果未启动）
     if not _queue_processor_started:
         background_tasks.add_task(start_concurrent_queue_processor)
@@ -342,6 +356,15 @@ async def start_generation(req: StartGenerationRequest, background_tasks: Backgr
         }
     
     clip_req = _project_storage[req.projectId]
+    
+    # ✅ 调试日志：打印读取到的项目配置
+    print(f"📖 读取项目配置: {req.projectId}")
+    print(f"   项目名称: {clip_req.name}")
+    print(f"   视频素材数量: {len(clip_req.videos)}")
+    if len(clip_req.videos) == 0:
+        print(f"   ⚠️  严重错误：项目配置中没有视频素材！")
+    else:
+        print(f"   ✅ 项目配置包含 {len(clip_req.videos)} 个视频素材")
     
     # 获取当前队列状态
     queue_status = get_queue_status_info()
