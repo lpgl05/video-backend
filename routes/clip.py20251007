@@ -55,7 +55,6 @@ class ClipRequest(BaseModel):
     duration: str
     videoCount: int
     voice: str
-    playbackSpeed: str
     style: StyleConfig
     portraitMode: Optional[bool] = None
     frameBlur: Optional[bool] = False  # 是否需要逐帧模糊视频，默认false
@@ -311,16 +310,6 @@ async def save_project_and_generate(req: ClipRequest, background_tasks: Backgrou
     print(f"   音频素材数量: {len(req.audios)}")
     print(f"   海报素材数量: {len(req.posters or [])}")
     print(f"   文案数量: {len(req.scripts)}")
-    
-    # ✅ 打印样式配置
-    print(f"🎨 样式配置:")
-    if req.style:
-        import json
-        style_dict = req.style.dict() if hasattr(req.style, 'dict') else req.style
-        print(f"   {json.dumps(style_dict, ensure_ascii=False, indent=2)}")
-    else:
-        print(f"   ⚠️ 未找到样式配置！")
-    
     if len(req.videos) > 0:
         print(f"   视频素材详情:")
         for i, v in enumerate(req.videos):
@@ -345,8 +334,7 @@ async def save_project_and_generate(req: ClipRequest, background_tasks: Backgrou
             "videoCount": req.videoCount,
             "voice": req.voice,
             "style": req.style.dict() if hasattr(req.style, "dict") else req.style,
-            "portraitMode": req.portraitMode,
-            "playbackSpeed":req.playbackSpeed
+            "portraitMode": req.portraitMode
         }
     }
 

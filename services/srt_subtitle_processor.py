@@ -227,8 +227,62 @@ def create_gpu_video_with_srt_subtitles(
     print(f"🎬 开始GPU+SRT字幕视频合成")
     print(f"   输入视频: {os.path.basename(input_video)}")
     print(f"   使用GPU: {use_gpu}")
+    print(f"   🔍 调试信息:")
+    print(f"      portraitMode: {portraitMode}")
+    print(f"      frameBlur: {frameBlur}")
+    print(f"      poster_image: {poster_image is not None}")
     
     try:
+        # ✅ 修复视频时长问题：预先延长视频到目标时长
+        from .clip_service import get_video_info, find_ffmpeg
+        
+        video_info = get_video_info(input_video)
+        source_duration = video_info.get('duration', 0)
+        
+        if source_duration > 0 and source_duration < duration:
+            print(f"⚠️ 视频时长({source_duration:.1f}s)小于目标时长({duration:.1f}s)，预先延长视频...")
+            extended_video = input_video.replace('.mp4', '_extended.mp4')
+            
+            # 计算需要循环的次数
+            loop_times = int(duration / source_duration) + 1
+            
+            # 创建concat列表文件
+            concat_list = input_video.replace('.mp4', '_concat_list.txt')
+            with open(concat_list, 'w') as f:
+                for _ in range(loop_times):
+                    f.write(f"file '{os.path.abspath(input_video)}'\n")
+            
+            # 使用CPU concat（更稳定）延长视频
+            ffmpeg = find_ffmpeg()
+            cmd = [
+                ffmpeg, '-y',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', concat_list,
+                '-t', str(duration),  # 截取到目标时长
+                '-c:v', 'libx264',  # CPU编码
+                '-preset', 'fast',
+                '-crf', '23',
+                '-c:a', 'aac',
+                '-b:a', '128k',
+                extended_video
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=False, timeout=120)
+            
+            # 清理临时文件
+            if os.path.exists(concat_list):
+                os.remove(concat_list)
+            
+            if result.returncode == 0 and os.path.exists(extended_video):
+                print(f"✅ 视频延长完成: {source_duration:.1f}s -> {duration:.1f}s")
+                input_video = extended_video  # 使用延长后的视频
+            else:
+                print(f"⚠️ 视频延长失败，将使用原视频（可能导致画面卡顿）")
+                print(f"   错误输出: {result.stderr.decode('utf-8', errors='ignore')[:200]}")
+        else:
+            print(f"✅ 视频时长({source_duration:.1f}s)足够，无需延长")
+        
         # 如果没有提供SRT文件但有字幕数据，则创建临时SRT文件
         temp_srt_file = None
         if not srt_file and subtitle_sentences:
@@ -275,12 +329,12 @@ def create_gpu_video_with_srt_subtitles(
                 gpu_decode_params = []
         
         # 基础命令 - 添加硬件解码和视频循环
-        if not portraitMode and poster_image is not None:
-            #横版视频且用户上传了背景图
+        if poster_image is not None:
+            # 有海报图片：无论是横版还是竖版都需要添加海报作为输入4
             cmd = [
                 'ffmpeg', '-y',
                 *gpu_decode_params,                   # GPU硬件解码参数
-                '-stream_loop', '-1', '-i', input_video,  # 输入0: 源视频（循环播放）
+                '-i', input_video,                    # 输入0: 源视频
                 '-loop', '1', '-i', title_image,      # 输入1: 标题图片（循环）
                 '-i', tts_audio,                      # 输入2: TTS音频
                 '-i', bgm_audio,                      # 输入3: BGM音频
@@ -290,7 +344,7 @@ def create_gpu_video_with_srt_subtitles(
             cmd = [
                 'ffmpeg', '-y',
                 *gpu_decode_params,                   # GPU硬件解码参数
-                '-stream_loop', '-1', '-i', input_video,  # 输入0: 源视频（循环播放）
+                '-i', input_video,                    # 输入0: 源视频
                 '-loop', '1', '-i', title_image,      # 输入1: 标题图片（循环）
                 '-i', tts_audio,                      # 输入2: TTS音频
                 '-i', bgm_audio,                      # 输入3: BGM音频
@@ -309,6 +363,10 @@ def create_gpu_video_with_srt_subtitles(
             title_y = f"H-h-{title_margin}"
 
         if not portraitMode:
+            print("   🔍 横版视频处理逻辑:")
+            print(f"      poster_image: {poster_image is not None}")
+            print(f"      frameBlur: {frameBlur}")
+            print(f"      ❌ 错误：portraitMode=False，应该输出9:16格式但使用了横版处理")
             # 横版视频，缩放标题宽度为1080，高度自适应
             if poster_image is not None:
                 filter_parts.append("[4:v]crop='min(iw,ih*9/16)':'min(ih,iw*16/9)':'(iw-min(iw,ih*9/16))/2':'(ih-min(ih,iw*16/9))/2'[bg_cropped];")
@@ -358,7 +416,26 @@ def create_gpu_video_with_srt_subtitles(
             if overlay_title not in filter_parts:
                 filter_parts.append(overlay_title)
         else:
-            filter_parts.append(f"[0:v][1:v]overlay=0:{title_y}[video_with_title];")
+            print("   🔍 竖版视频处理逻辑:")
+            print(f"      portraitMode: {portraitMode}")
+            print(f"      poster_image: {poster_image is not None}")
+            print(f"      ✅ 正确：portraitMode=True，将输出9:16格式")
+            
+            # ✅ 修复：竖版视频也需要处理海报背景
+            if poster_image is not None:
+                # 有海报背景：海报作为背景，视频保持16:9比例居中叠加
+                print("   🖼️ 竖版视频使用海报背景，视频保持16:9比例居中")
+                filter_parts.append("[4:v]scale=1080:1920:flags=fast_bilinear[bg];")
+                # ✅ 修复：保持视频16:9比例，不拉伸，居中显示
+                # 16:9视频在9:16画布中居中：视频宽度1080，高度607，上下留白
+                filter_parts.append("[0:v]scale=1080:607:flags=fast_bilinear[fg];")
+                filter_parts.append("[bg][fg]overlay=0:(H-h)/2[video_base];")
+                filter_parts.append(f"[video_base][1:v]overlay=0:{title_y}[video_with_title];")
+            else:
+                # 无海报背景：直接缩放视频为9:16格式
+                print("   📹 竖版视频直接缩放为9:16格式")
+                filter_parts.append(f"[0:v]scale=1080:1920:flags=fast_bilinear[video_scaled];")
+                filter_parts.append(f"[video_scaled][1:v]overlay=0:{title_y}[video_with_title];")
         
         # 如果有SRT字幕，添加字幕处理
         if srt_file and os.path.exists(srt_file):
@@ -374,6 +451,8 @@ def create_gpu_video_with_srt_subtitles(
             color = subtitle_config.get("color", "#ffffff")  # 默认白色
             stroke_color = subtitle_config.get("strokeColor", "#000000")  # 默认黑色描边
             stroke_width = subtitle_config.get("strokeWidth", 2)  # 默认描边宽度2
+            shadow = subtitle_config.get("shadow", 0)  # 默认无阴影
+            position = subtitle_config.get("position", "bottom")  # 默认底部
             
             # 颜色转换：从#ffffff格式转换为&Hffffff格式（BGR格式）
             def hex_to_ass_color(hex_color):
@@ -388,11 +467,36 @@ def create_gpu_video_with_srt_subtitles(
             primary_color = hex_to_ass_color(color)
             outline_color = hex_to_ass_color(stroke_color)
             
+            # 计算字幕的MarginV（垂直边距）和Alignment（对齐方式）
+            margin_v = 50  # 默认底部边距50px
+            alignment = 2  # 默认底部居中
+            
+            if position == "template2":
+                # 竖屏模板：使用底部居中对齐
+                # 先用非常小的MarginV（底边距100px），确保字幕一定显示
+                margin_v = 100  # 距离底部100px，确保字幕显示
+                alignment = 2  # 底部居中（水平居中，垂直从底部计算）
+            elif position == "top":
+                margin_v = 50
+                alignment = 8  # 顶部居中
+            elif position == "center":
+                margin_v = 0  # 居中
+                alignment = 5  # 垂直居中
+            elif position == "bottom":
+                margin_v = 50
+                alignment = 2  # 底部居中
+            
+            # 设置左右边距为0，确保字幕居中
+            margin_l = 0  # 左边距
+            margin_r = 0  # 右边距
+            
             print(f"🎨 字幕样式配置:")
             print(f"   字体大小: {font_size}px")
             print(f"   字体颜色: {color} -> {primary_color}")
             print(f"   描边颜色: {stroke_color} -> {outline_color}")
             print(f"   描边宽度: {stroke_width}")
+            print(f"   阴影深度: {shadow}")
+            print(f"   字幕位置: {position}, Alignment={alignment}, MarginV={margin_v}px, MarginL={margin_l}px, MarginR={margin_r}px")
             
             # 尝试多种字体配置方案
             subtitle_filter_attempts = []
@@ -407,16 +511,16 @@ def create_gpu_video_with_srt_subtitles(
                 
                 subtitle_filter_attempts = [
                     # 方案1: 指定字体目录和字体名，使用样式配置
-                    f"subtitles='{srt_path}':charenc=UTF-8:fontsdir='{font_dir}':force_style='FontName={font_name_without_ext},FontSize={font_size},PrimaryColour={primary_color},OutlineColour={outline_color},Outline={stroke_width}'",
+                    f"subtitles='{srt_path}':charenc=UTF-8:fontsdir='{font_dir}':force_style='FontName={font_name_without_ext},FontSize={font_size},PrimaryColour={primary_color},OutlineColour={outline_color},Outline={stroke_width},Shadow={shadow},Alignment={alignment},MarginV={margin_v},MarginL={margin_l},MarginR={margin_r}'",
                     
                     # 方案2: 直接使用字体文件名，使用样式配置
-                    f"subtitles='{srt_path}':charenc=UTF-8:force_style='FontName={font_name_without_ext},FontSize={font_size},PrimaryColour={primary_color},OutlineColour={outline_color},Outline={stroke_width}'",
+                    f"subtitles='{srt_path}':charenc=UTF-8:force_style='FontName={font_name_without_ext},FontSize={font_size},PrimaryColour={primary_color},OutlineColour={outline_color},Outline={stroke_width},Shadow={shadow},Alignment={alignment},MarginV={margin_v},MarginL={margin_l},MarginR={margin_r}'",
                     
                     # 方案3: 使用常见的中文字体名，使用样式配置
-                    f"subtitles='{srt_path}':charenc=UTF-8:force_style='FontName=Source Han Sans CN,FontSize={font_size},PrimaryColour={primary_color},OutlineColour={outline_color},Outline={stroke_width}'",
+                    f"subtitles='{srt_path}':charenc=UTF-8:force_style='FontName=Source Han Sans CN,FontSize={font_size},PrimaryColour={primary_color},OutlineColour={outline_color},Outline={stroke_width},Shadow={shadow},Alignment={alignment},MarginV={margin_v},MarginL={margin_l},MarginR={margin_r}'",
                     
                     # 方案4: 回退到无字体指定，使用样式配置
-                    f"subtitles='{srt_path}':charenc=UTF-8:force_style='FontSize={font_size},PrimaryColour={primary_color},OutlineColour={outline_color},Outline={stroke_width}'"
+                    f"subtitles='{srt_path}':charenc=UTF-8:force_style='FontSize={font_size},PrimaryColour={primary_color},OutlineColour={outline_color},Outline={stroke_width},Shadow={shadow},Alignment={alignment},MarginV={margin_v},MarginL={margin_l},MarginR={margin_r}'"
                 ]
                 
                 print(f"🎨 字体目录: {font_dir}")
@@ -424,7 +528,7 @@ def create_gpu_video_with_srt_subtitles(
             else:
                 # 无字体文件，使用基本配置和样式参数
                 subtitle_filter_attempts = [
-                    f"subtitles='{srt_path}':charenc=UTF-8:force_style='FontSize={font_size},PrimaryColour={primary_color},OutlineColour={outline_color},Outline={stroke_width}'"
+                    f"subtitles='{srt_path}':charenc=UTF-8:force_style='FontSize={font_size},PrimaryColour={primary_color},OutlineColour={outline_color},Outline={stroke_width},Shadow={shadow},Alignment={alignment},MarginV={margin_v},MarginL={margin_l},MarginR={margin_r}'"
                 ]
             
             # 使用第一个字体配置方案

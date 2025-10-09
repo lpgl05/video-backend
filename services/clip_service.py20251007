@@ -769,14 +769,10 @@ def create_subtitle_image(text, width=480, height=854, style=None):
 
     return img
 
-async def generate_tts_audio(text: str, output_path: str, voice: str = "zh-CN-XiaoxiaoNeural", speed: float=1.0 ):
+async def generate_tts_audio(text: str, output_path: str, voice: str = "zh-CN-XiaoxiaoNeural"):
     """使用 edge_tts 生成语音文件"""
     try:
-        if speed>=1:
-           playbackSpeed=  "+"+str(int(speed*100-100))+"%"
-        else:
-           playbackSpeed = "-" + str(100-int(speed * 100)) + "%"
-        communicate = edge_tts.Communicate(text, voice, rate=playbackSpeed)
+        communicate = edge_tts.Communicate(text, voice)
         await communicate.save(output_path)
         print(f"TTS音频生成完成: {output_path}, {voice}")
     except Exception as e:
@@ -1304,12 +1300,8 @@ def _process_single_video_001(video_index, video_count, local_video_paths, local
         montage_start = time.time()
         temp_clips = []
         n_videos = len(local_video_paths)
-        
-        # ✅ 方案A：增加5秒缓冲时间，避免后续视频延长步骤（节省1分钟）
-        montage_target_duration = duration_sec + 5  # 多拼接5秒，确保视频足够长
-        base_duration = montage_target_duration // n_videos
-        remaining_duration = montage_target_duration % n_videos
-        print(f"   🎯 蒙太奇目标时长: {montage_target_duration}秒 (TTS: {duration_sec}秒 + 5秒缓冲)")
+        base_duration = duration_sec // n_videos
+        remaining_duration = duration_sec % n_videos
         
         # 关键改进：为每个视频随机打乱素材顺序，确保每个视频使用不同的拼接顺序
         # 创建索引列表并打乱
@@ -1380,7 +1372,7 @@ def _process_single_video_001(video_index, video_count, local_video_paths, local
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(generate_tts_audio(script, tts_path, voice, float(req.playbackSpeed)))
+            loop.run_until_complete(generate_tts_audio(script, tts_path, voice))
         finally:
             loop.close()
         
@@ -1394,7 +1386,6 @@ def _process_single_video_001(video_index, video_count, local_video_paths, local
             audio_clip_tmp = AudioFileClip(tts_path)
             tts_len = audio_clip_tmp.duration
             audio_clip_tmp.close()
-            target_duration = tts_len
             if tts_len and tts_len > duration_sec:
                 print(f"   🎵 线程{video_index+1}: TTS时长{tts_len:.2f}s > 目标时长{duration_sec}s，扩展到{tts_len:.2f}s")
                 target_duration = tts_len
@@ -1417,7 +1408,7 @@ def _process_single_video_001(video_index, video_count, local_video_paths, local
             text = sentence.strip()
             if text:
                 # 根据文字长度估算显示时间，但不超过平均时间
-                estimated_duration = min(max(2.0, len(text) * 0.15), time_per_sentence * 1.0)
+                estimated_duration = min(max(2.0, len(text) * 0.15), time_per_sentence * 1.5)
                 subtitle_sentences.append({
                     "text": text,
                     "start_time": current_time,
@@ -1442,11 +1433,6 @@ def _process_single_video_001(video_index, video_count, local_video_paths, local
         # 🚀 使用GPU加速SRT字幕处理
         print(f"   🚀 线程{video_index+1}: 开始GPU加速视频合成")
         from services.srt_subtitle_processor import create_gpu_video_with_srt_subtitles
-        
-        print(f"   🔍 调试信息 - 线程{video_index+1}:")
-        print(f"      req.portraitMode: {req.portraitMode}")
-        print(f"      subtitle_position: {subtitle_position}")
-        print(f"      templateId: {req.templateId if hasattr(req, 'templateId') else 'None'}")
         
         success = create_gpu_video_with_srt_subtitles(
             input_video=montage_clip_path,
@@ -1862,12 +1848,8 @@ def create_optimized_video_with_ass_subtitles_gpu_enhanced(source_video, title_i
     
     print(f"   🚀 线程{thread_id}: 强制使用GPU硬件解码和编码")
     
-    # ✅ 修复：所有模板都输出9:16格式，不再根据subtitle_position判断
-    portrait_mode = True  # 统一设置为True，确保输出9:16格式
-    print(f"   🔍 调试信息 - 线程{thread_id}:")
-    print(f"      subtitle_position: {subtitle_position}")
-    print(f"      portrait_mode: {portrait_mode}")
-    print(f"      目标尺寸: {target_width}x{target_height} (9:16格式)")
+    # 🚀 优化的滤镜链 - 减少CPU操作，专为template2优化
+    portrait_mode = subtitle_position == "template2"
     
     if portrait_mode:
         # 竖屏模式：直接缩放，减少复杂操作
@@ -1912,11 +1894,6 @@ def create_optimized_video_with_ass_subtitles_gpu_enhanced(source_video, title_i
     
     try:
         print(f"   ⚡ 线程{thread_id}: 开始GPU加速FFmpeg处理...")
-        print(f"   🔍 FFmpeg命令预览:")
-        print(f"      输入视频: {os.path.basename(source_video)}")
-        print(f"      输出路径: {os.path.basename(output_path)}")
-        print(f"      滤镜链: {filter_complex}")
-        print(f"      目标尺寸: {target_width}x{target_height}")
         
         # 执行FFmpeg命令
         result = subprocess.run(cmd, capture_output=True, text=False, timeout=600)
@@ -2815,12 +2792,8 @@ def _process_single_video_optimized(video_index, video_count, local_video_paths,
         montage_start = time.time()
         temp_clips = []
         n_videos = len(local_video_paths)
-        
-        # ✅ 方案A：增加5秒缓冲时间，避免后续视频延长步骤（节省1分钟）
-        montage_target_duration = duration_sec + 5  # 多拼接5秒，确保视频足够长
-        base_duration = montage_target_duration // n_videos
-        remaining_duration = montage_target_duration % n_videos
-        print(f"   🎯 蒙太奇目标时长: {montage_target_duration}秒 (TTS: {duration_sec}秒 + 5秒缓冲)")
+        base_duration = duration_sec // n_videos
+        remaining_duration = duration_sec % n_videos
         
         # 关键改进：为每个视频随机打乱素材顺序，确保每个视频使用不同的拼接顺序
         # 创建索引列表并打乱
@@ -2892,7 +2865,7 @@ def _process_single_video_optimized(video_index, video_count, local_video_paths,
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete((script, tts_path, voice, float(req.playbackSpeed)))
+            loop.run_until_complete(generate_tts_audio(script, tts_path, voice))
         finally:
             loop.close()
         
