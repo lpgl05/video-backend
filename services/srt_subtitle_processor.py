@@ -468,7 +468,7 @@ def create_gpu_video_with_srt_subtitles(
             outline_color = hex_to_ass_color(stroke_color)
             
             # 计算字幕的MarginV（垂直边距）和Alignment（对齐方式）
-            margin_v = 60  # 默认底部边距60px
+            margin_v = 70  # 默认底部边距60px
             alignment = 2  # 默认底部居中
             
             if position == "template2":
