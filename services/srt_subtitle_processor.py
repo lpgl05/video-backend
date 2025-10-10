@@ -468,13 +468,13 @@ def create_gpu_video_with_srt_subtitles(
             outline_color = hex_to_ass_color(stroke_color)
             
             # 计算字幕的MarginV（垂直边距）和Alignment（对齐方式）
-            margin_v = 50  # 默认底部边距50px
+            margin_v = 60  # 默认底部边距60px
             alignment = 2  # 默认底部居中
             
             if position == "template2":
                 # 竖屏模板：使用底部居中对齐
                 # 先用非常小的MarginV（底边距100px），确保字幕一定显示
-                margin_v = 100  # 距离底部100px，确保字幕显示
+                margin_v = 60  # 距离底部60px，确保字幕显示
                 alignment = 2  # 底部居中（水平居中，垂直从底部计算）
             elif position == "top":
                 margin_v = 50
