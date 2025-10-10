@@ -12,3 +12,5 @@ edge-tts>=7.2.0
 python-dotenv>=1.1.1
 aiofiles
 psutil
+zipstream-new
+httpx>=0.25.0
