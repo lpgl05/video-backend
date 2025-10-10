@@ -425,10 +425,10 @@ def create_gpu_video_with_srt_subtitles(
             if poster_image is not None:
                 # 有海报背景：海报作为背景，视频保持16:9比例居中叠加
                 print("   🖼️ 竖版视频使用海报背景，视频保持16:9比例居中")
-                filter_parts.append("[4:v]scale=1080:1920:flags=fast_bilinear[bg];")
+                filter_parts.append("[0:v]scale=1080:1920:flags=fast_bilinear[bg];")
                 # ✅ 修复：保持视频16:9比例，不拉伸，居中显示
                 # 16:9视频在9:16画布中居中：视频宽度1080，高度607，上下留白
-                filter_parts.append("[0:v]scale=1080:607:flags=fast_bilinear[fg];")
+                filter_parts.append("[4:v]scale=1080:1920:flags=fast_bilinear[fg];")
                 filter_parts.append("[bg][fg]overlay=0:(H-h)/2[video_base];")
                 filter_parts.append(f"[video_base][1:v]overlay=0:{title_y}[video_with_title];")
             else:
