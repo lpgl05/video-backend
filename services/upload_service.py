@@ -2,6 +2,7 @@ import os
 from uuid import uuid4
 from datetime import datetime
 from models.oss_client import OSSClient
+from services.VolcengineOSSClient import VolcengineOSSClient
 import asyncio
 from typing import Dict, Any
 
@@ -11,7 +12,15 @@ OSS_AUDIO_DIR = "uploads/audios"
 OSS_POSTER_DIR = "uploads/posters"
 USE_OSS = True  # 团队协作模式强制使用OSS存储
 
-oss_client = OSSClient()
+# 根据环境变量选择 OSS 供应商
+oss_engine = os.getenv("STORAGE_PROVIDER", "alibaba").lower()
+
+if oss_engine == "volcengine":
+    oss_client = VolcengineOSSClient()
+    print("✅ 使用火山云 TOS 存储")
+else:
+    oss_client = OSSClient()
+    print("✅ 使用阿里云 OSS 存储")
 
 # 全局上传任务追踪器
 upload_tasks: Dict[str, Dict[str, Any]] = {}

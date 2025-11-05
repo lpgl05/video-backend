@@ -8,6 +8,7 @@ requests>=2.32.4
 sqlalchemy>=2.0.42
 uvicorn>=0.35.0
 oss2>=2.19.1
+tos>=2.6.0
 edge-tts>=7.2.0
 python-dotenv>=1.1.1
 aiofiles
